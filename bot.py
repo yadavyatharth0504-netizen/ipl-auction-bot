@@ -9,7 +9,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from flask import Flask
 
 # --- CONFIGURATION ---
-TOKEN = "8250315005:AAHLDBunMwWuFFFodOanTq3GSatKU9jyzdI"  # Your Token
+TOKEN = "8250315005:AAGDDZHqcYOp0_e7Ab6-aCzXx1-RDi6w_AY"  # Your Token
 DB_URI = os.getenv("DATABASE_URL")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -434,3 +434,4 @@ if __name__ == '__main__':
     
     print("Bot Started...")
     app_bot.run_polling()
+
