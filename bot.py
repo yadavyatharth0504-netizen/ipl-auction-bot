@@ -325,9 +325,9 @@ def get_player_by_arg(arg, player_list):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = """
-📚 IPL Auction Bot Commands
+📚 **IPL Auction Bot Commands**
 
-Auctioneer Only:
+**Auctioneer Only:**
 /start_auction - Initialize the auction 🚀
 /pause_auction - Pause bidding ⏸
 /resume_auction - Resume bidding ▶
@@ -340,7 +340,7 @@ Auctioneer Only:
 /sold - Sell current player to highest bidder 🔨
 /auctioneer_change - Transfer admin rights 👑
 
-Team Owners:
+**Team Owners:**
 /bid <amount> - Place bid (in Crores) 💰
 /purse - Check remaining funds 💸
 /teamlist - View squad & money spent 🏆
@@ -367,7 +367,7 @@ async def start_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "highest_bidder": None
     }
     save_state(chat_id, state)
-    await update.message.reply_text(f"🚀 Auction Started!\nAuctioneer: {update.effective_user.first_name}\n\nUse /add_owner to set up teams.")
+    await update.message.reply_text(f"🚀 **Auction Started!**\nAuctioneer: {update.effective_user.first_name}\n\nUse /add_owner to set up teams.")
 
 async def control_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -379,7 +379,7 @@ async def control_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "/pause" in cmd:
         state['status'] = "PAUSED"
         await update.message.reply_text("⏸ Auction Paused.")
-        elif "/resume" in cmd:
+    elif "/resume" in cmd:
         state['status'] = "IDLE" if state['current_player'] is None else "BIDDING"
         await update.message.reply_text("▶ Auction Resumed.")
     elif "/end" in cmd:
@@ -413,7 +413,7 @@ async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "squad": []
         }
         save_state(chat_id, state)
-        await update.message.reply_text(f"✅ Team {team_name} added for {target_name}!")
+        await update.message.reply_text(f"✅ Team **{team_name}** added for {target_name}!")
     except:
         await update.message.reply_text("Usage: /add_owner <TeamName> (Reply to the user!)")
 
@@ -436,7 +436,7 @@ async def remove_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         del state['teams'][team_name]
         save_state(chat_id, state)
-        await update.message.reply_text(f"❌ Team {team_name} removed. {len(players_to_return)} players returned to pool.")
+        await update.message.reply_text(f"❌ Team **{team_name}** removed. {len(players_to_return)} players returned to pool.")
     except:
         await update.message.reply_text("Usage: /remove_owner <TeamName>")
 
@@ -455,7 +455,7 @@ async def replace_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state['teams'][team_name]['owner_id'] = new_id
             state['teams'][team_name]['owner_name'] = new_name
             save_state(chat_id, state)
-            await update.message.reply_text(f"🔄 Owner for {team_name} changed to {new_name}.")
+            await update.message.reply_text(f"🔄 Owner for **{team_name}** changed to {new_name}.")
         else:
             await update.message.reply_text("⚠ Please reply to the NEW owner.")
     except:
@@ -474,7 +474,8 @@ async def auctioneer_change(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"👑 Auctioneer changed! New Admin: {new_admin_name}")
     else:
         await update.message.reply_text("⚠ Reply to the user you want to make Auctioneer.")
-        async def bring_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def bring_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
     if not state or not is_admin(update.effective_user.id, state): return
@@ -510,7 +511,7 @@ async def auctioneer_change(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state['unsold'] = [p for p in state['unsold'] if p['id'] != player['id']]
     save_state(chat_id, state)
     
-    msg = (f"🏏 PLAYER ON AUCTION 🏏\n"
+    msg = (f"🏏 **PLAYER ON AUCTION** 🏏\n"
            f"Name: {player['name']} (ID: {player['id']})\n"
            f"Role: {player['role']}\n"
            f"Nat: {player['nat']}\n"
@@ -554,7 +555,7 @@ async def bid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state['current_bid'] = amount
         state['highest_bidder'] = my_team_name
         save_state(chat_id, state)
-        await update.message.reply_text(f"💰 {my_team_name} bids {amount} Cr!")
+        await update.message.reply_text(f"💰 **{my_team_name}** bids {amount} Cr!")
         
     except:
         await update.message.reply_text("Usage: /bid <amount>")
@@ -574,13 +575,14 @@ async def sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not winner:
         state['unsold'].append(player)
-        await update.message.reply_text(f"❌ {player['name']} is UNSOLD.")
+        await update.message.reply_text(f"❌ **{player['name']}** is UNSOLD.")
     else:
         state['teams'][winner]['spent'] += price
         player['sold_price'] = price
         state['teams'][winner]['squad'].append(player)
-        await update.message.reply_text(f"🔨 SOLD!\n{player['name']} to {winner} for {price} Cr!")
-        state['current_player'] = None
+        await update.message.reply_text(f"🔨 **SOLD!**\n{player['name']} to {winner} for {price} Cr!")
+
+    state['current_player'] = None
     state['current_bid'] = 0
     state['highest_bidder'] = None
     state['status'] = "IDLE"
@@ -594,23 +596,23 @@ async def view_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cmd = update.message.text.split()[0]
     
     if "/purse" in cmd:
-        msg = "💰 Purse Status\n"
+        msg = "💰 **Purse Status**\n"
         for t_name, t_data in state['teams'].items():
             rem = state['purse_limit'] - t_data['spent']
             msg += f"{t_name}: {rem:.2f} Cr remaining\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
         
     elif "/teamlist" in cmd:
-        msg = "📋 Squads\n"
+        msg = "📋 **Squads**\n"
         for t_name, t_data in state['teams'].items():
             rem = state['purse_limit'] - t_data['spent']
-            msg += f"\n🏆 {t_name} (Purse: {rem:.2f} Cr)\n"
+            msg += f"\n🏆 **{t_name}** (Purse: {rem:.2f} Cr)\n"
             for p in t_data['squad']:
                 msg += f"- {p['name']} ({p['sold_price']} Cr)\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
 
 # --- FLASK SERVER ---
-app = Flask(name)
+app = Flask(__name__)
 @app.route('/')
 def home(): return "IPL Auction Bot Running"
 def run_flask():
@@ -618,7 +620,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # --- MAIN ---
-if name == 'main':
+if __name__ == '__main__':
     init_db()
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
