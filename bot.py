@@ -434,12 +434,23 @@ async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         team_name = context.args[0]
+        
+        # Get the target user ID and Name
         if update.message.reply_to_message:
             target_id = update.message.reply_to_message.from_user.id
             target_name = update.message.reply_to_message.from_user.first_name
         else:
+            # If they provided an ID manually (e.g. /add_owner MI 123456789)
             target_id = int(context.args[1])
             target_name = "User"
+
+        # --- 🛡️ NEW SECURITY CHECK 🛡️ ---
+        # Check if this user already owns a different team
+        for t_name, t_data in state['teams'].items():
+            if t_data['owner_id'] == target_id:
+                await update.message.reply_text(f"🚫 Stop! This user already owns **{t_name}**.")
+                return
+        # ----------------------------------
 
         state['teams'][team_name] = {
             "owner_id": target_id,
@@ -448,9 +459,12 @@ async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "squad": []
         }
         save_state(chat_id, state)
-        await update.message.reply_text(f"✅ Team **{team_name}** added!")
-    except:
+        await update.message.reply_text(f"✅ Team **{team_name}** added for owner **{target_name}**!")
+        
+    except IndexError:
         await update.message.reply_text("Usage: /add_owner <TeamName> (Reply to user)")
+    except ValueError:
+        await update.message.reply_text("Invalid User ID format.")
 
 async def bring_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -654,3 +668,4 @@ if __name__ == '__main__':
     
     print("Bot Started...")
     app_bot.run_polling()
+
