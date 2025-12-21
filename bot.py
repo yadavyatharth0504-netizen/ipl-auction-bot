@@ -1,4 +1,4 @@
-¼import os
+import os
 import json
 import logging
 import random
@@ -668,5 +668,6 @@ if __name__ == '__main__':
     
     print("Bot Started...")
     app_bot.run_polling()
+
 
 
