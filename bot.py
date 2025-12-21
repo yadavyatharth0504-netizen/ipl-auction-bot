@@ -19,9 +19,9 @@ PURSE_LIMIT = 120.0
 MAX_SQUAD_SIZE = 15
 MAX_FOREIGNERS = 6
 MIN_WICKETKEEPERS = 1
-MIN_BOWLING_OPTIONS = 6 # Bowlers + Allrounders
+MIN_BOWLING_OPTIONS = 6
 
-# --- MASTER PLAYER LIST (Same as before) ---
+# --- MASTER PLAYER LIST (ALL 250 PLAYERS) ---
 MASTER_PLAYER_LIST = [
     {"id": 1, "name": "KL Rahul", "role": "Wicketkeeper", "nat": "Indian", "base": 2.0},
     {"id": 2, "name": "Ishan Kishan", "role": "Wicketkeeper", "nat": "Indian", "base": 2.0},
@@ -283,391 +283,242 @@ def init_db():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS auction_states (
-                chat_id BIGINT PRIMARY KEY,
-                data TEXT
-            );
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"DB Setup Error: {e}")
+        cur.execute("CREATE TABLE IF NOT EXISTS auction_states (chat_id BIGINT PRIMARY KEY, data TEXT);")
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e: print(f"DB Error: {e}")
 
 def save_state(chat_id, data_dict):
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = get_db_connection(); cur = conn.cursor()
     json_data = json.dumps(data_dict)
-    cur.execute("""
-        INSERT INTO auction_states (chat_id, data) VALUES (%s, %s)
-        ON CONFLICT (chat_id) DO UPDATE SET data = %s
-    """, (chat_id, json_data, json_data))
-    conn.commit()
-    cur.close()
-    conn.close()
+    cur.execute("INSERT INTO auction_states (chat_id, data) VALUES (%s, %s) ON CONFLICT (chat_id) DO UPDATE SET data = %s", (chat_id, json_data, json_data))
+    conn.commit(); cur.close(); conn.close()
 
 def load_state(chat_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT data FROM auction_states WHERE chat_id = %s", (chat_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    row = cur.fetchone(); cur.close(); conn.close()
     return json.loads(row[0]) if row else None
 
-# --- HELPERS ---
-def is_admin(user_id, state):
-    return user_id == state['admin']
-
-def get_player_by_arg(arg, player_list):
-    arg_str = str(arg).lower()
-    for p in player_list:
-        if str(p['id']) == arg_str or p['name'].lower() == arg_str:
-            return p
-    return None
+# --- HELPER: CHECK IF USER IS TELEGRAM ADMIN ---
+async def is_user_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    try:
+        member = await context.bot.get_chat_member(chat_id, user_id)
+        return member.status in ['administrator', 'creator']
+    except: return False
 
 def check_rules(team_data, new_player):
-    """
-    Returns (True, "") if legal.
-    Returns (False, "Reason") if illegal.
-    """
     squad = team_data['squad']
-    
-    # 1. Max Squad Size (15)
-    if len(squad) >= MAX_SQUAD_SIZE:
-        return False, f"Squad full! Max {MAX_SQUAD_SIZE} players allowed."
-    
-    # 2. Foreign Player Limit (6)
-    current_foreigners = sum(1 for p in squad if p['nat'] == 'Foreign')
-    if new_player['nat'] == 'Foreign' and current_foreigners >= MAX_FOREIGNERS:
-        return False, f"Foreigner limit reached! Max {MAX_FOREIGNERS} allowed."
-        
+    if len(squad) >= MAX_SQUAD_SIZE: return False, f"Squad full! Max {MAX_SQUAD_SIZE} players."
+    curr_for = sum(1 for p in squad if p['nat'] == 'Foreign')
+    if new_player['nat'] == 'Foreign' and curr_for >= MAX_FOREIGNERS: return False, f"Foreigner limit ({MAX_FOREIGNERS}) reached!"
     return True, ""
 
 def get_team_stats(squad):
-    """Returns count of WK and Bowlers/ARs"""
-    wk_count = sum(1 for p in squad if p['role'] == 'Wicketkeeper')
-    bowling_options = sum(1 for p in squad if p['role'] in ['Bowler', 'Allrounder'])
-    return wk_count, bowling_options
+    wk = sum(1 for p in squad if p['role'] == 'Wicketkeeper')
+    bowl = sum(1 for p in squad if p['role'] in ['Bowler', 'Allrounder'])
+    return wk, bowl
 
 # --- COMMANDS ---
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = """
-📚 **IPL Auction Bot Commands**
+🏆 **IPL Auction Bot Commands**
 
-**Auctioneer Only:**
-/start_auction - Start Event 🚀
-/pause_auction - Pause Bidding ⏸
-/resume_auction - Resume Bidding ▶
-/end_auction - Close & Clear Data 🛑
-/add_owner <Name> - Add Team ✅
-/remove_owner <Name> - Remove Team ❌
-/new_player - Random Player 🎲
-/player <Name/ID> - Specific Player 🏏
-/sold - Sell to Highest Bidder 🔨
-/unsold_players - View Unsold List 📋
+**For Admins:**
+/start_auction - Start Session
+/pause_auction - Pause bidding
+/resume_auction - Resume bidding
+/end_auction - Clear all data
+/add_owner <Name> - Reply to user to add
+/new_player - Bring random player
+/player <ID/Name> - Bring specific player
+/sold - Finalize current sale
 
-**Team Owners:**
-/bid <amount> - Place Bid 💰
-/purse - Check Funds 💸
-/teamlist - View Squad & Rules 🏆
-
-**Rules:**
-• Max 15 Players
-• Max 6 Foreigners
-• Min 1 Wicketkeeper (Warning only)
-• Min 6 Bowling Options (Warning only)
+**For Owners:**
+/bid <amount> - Place your bid
+/purse - Check budgets
+/unsold_players - List of passed players
     """
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def start_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    
     if load_state(chat_id):
-        await update.message.reply_text("⚠ Auction already running!")
+        await update.message.reply_text("⚠ Auction is already active!")
         return
-
     state = {
-        "admin": user_id,
         "status": "IDLE",
-        "purse_limit": PURSE_LIMIT,
         "teams": {},
         "unsold": MASTER_PLAYER_LIST.copy(),
-        "passed_players": [], # Players who went unsold
+        "passed_players": [],
         "current_player": None,
         "current_bid": 0,
         "highest_bidder": None
     }
     save_state(chat_id, state)
-    await update.message.reply_text(f"🚀 **Auction Started!**\nPurse: {PURSE_LIMIT} Cr\nSquad Limit: {MAX_SQUAD_SIZE}")
+    await update.message.reply_text("🚀 **Auction Session Initialized**\nPurse Limit: 120 Cr\nAny Group Admin can now manage the auction.")
 
 async def control_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
-    if not state or not is_admin(update.effective_user.id, state): return
+    if not state: return
     
-    cmd = update.message.text.split()[0]
-    
-    if "/pause" in cmd:
-        state['status'] = "PAUSED"
-        await update.message.reply_text("⏸ Auction Paused.")
-    elif "/resume" in cmd:
-        state['status'] = "IDLE" if state['current_player'] is None else "BIDDING"
-        await update.message.reply_text("▶ Auction Resumed.")
+    cmd = update.message.text
+    if "/pause" in cmd: state['status'] = "PAUSED"; msg = "⏸ Bidding Paused."
+    elif "/resume" in cmd: state['status'] = "BIDDING" if state['current_player'] else "IDLE"; msg = "▶ Bidding Resumed."
     elif "/end" in cmd:
-        conn = get_db_connection()
-        cur = conn.cursor()
+        conn = get_db_connection(); cur = conn.cursor()
         cur.execute("DELETE FROM auction_states WHERE chat_id = %s", (chat_id,))
-        conn.commit()
-        await update.message.reply_text("🛑 Auction Ended. Data cleared.")
-        return 
+        conn.commit(); await update.message.reply_text("🛑 Auction Terminated. Data wiped."); return 
 
     save_state(chat_id, state)
+    await update.message.reply_text(msg)
 
 async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
-    if not state or not is_admin(update.effective_user.id, state): return
-
+    if not state: return
     try:
         team_name = context.args[0]
+        target = update.message.reply_to_message.from_user if update.message.reply_to_message else None
+        if not target: 
+             await update.message.reply_text("Reply to a user to make them owner.")
+             return
         
-        # Get the target user ID and Name
-        if update.message.reply_to_message:
-            target_id = update.message.reply_to_message.from_user.id
-            target_name = update.message.reply_to_message.from_user.first_name
-        else:
-            # If they provided an ID manually (e.g. /add_owner MI 123456789)
-            target_id = int(context.args[1])
-            target_name = "User"
-
-        # --- 🛡️ NEW SECURITY CHECK 🛡️ ---
-        # Check if this user already owns a different team
         for t_name, t_data in state['teams'].items():
-            if t_data['owner_id'] == target_id:
-                await update.message.reply_text(f"🚫 Stop! This user already owns **{t_name}**.")
+            if t_data['owner_id'] == target.id:
+                await update.message.reply_text(f"🚫 User already owns **{t_name}**!")
                 return
-        # ----------------------------------
 
-        state['teams'][team_name] = {
-            "owner_id": target_id,
-            "owner_name": target_name,
-            "spent": 0.0,
-            "squad": []
-        }
+        state['teams'][team_name] = {"owner_id": target.id, "owner_name": target.first_name, "spent": 0.0, "squad": []}
         save_state(chat_id, state)
-        await update.message.reply_text(f"✅ Team **{team_name}** added for owner **{target_name}**!")
-        
-    except IndexError:
-        await update.message.reply_text("Usage: /add_owner <TeamName> (Reply to user)")
-    except ValueError:
-        await update.message.reply_text("Invalid User ID format.")
+        await update.message.reply_text(f"✅ Team **{team_name}** assigned to **{target.first_name}**")
+    except: await update.message.reply_text("Usage: /add_owner <TeamName> (Reply to user)")
 
 async def bring_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
-    if not state or not is_admin(update.effective_user.id, state): return
+    if not state: return
 
-    command = update.message.text.split()[0]
+    cmd = update.message.text
     player = None
-
-    if "/new_player" in command:
-        if not state['unsold']:
-            await update.message.reply_text("No players left!")
+    if "/new_player" in cmd:
+        if not state['unsold']: 
+            await update.message.reply_text("No more players in unsold list!")
             return
         player = random.choice(state['unsold'])
-    elif "/player" in command:
-        try:
-            query = " ".join(context.args)
-            player = get_player_by_arg(query, state['unsold'])
-            if not player:
-                # Check passed list
-                player = get_player_by_arg(query, state['passed_players'])
-                if player:
-                    state['passed_players'] = [p for p in state['passed_players'] if p['id'] != player['id']]
-                else:
-                    await update.message.reply_text("Player not found or already sold.")
-                    return
-        except:
-            await update.message.reply_text("Usage: /player <Name/ID>")
-            return
+    elif "/player" in cmd:
+        query = " ".join(context.args).lower()
+        player = next((p for p in state['unsold'] if str(p['id']) == query or p['name'].lower() == query), None)
+        if not player:
+            player = next((p for p in state['passed_players'] if str(p['id']) == query or p['name'].lower() == query), None)
+            if player: state['passed_players'] = [p for p in state['passed_players'] if p['id'] != player['id']]
 
-    state['current_player'] = player
-    state['current_bid'] = player['base']
-    state['highest_bidder'] = None
-    state['status'] = "BIDDING"
-    
-    # Remove from unsold temporarily
-    state['unsold'] = [p for p in state['unsold'] if p['id'] != player['id']]
-    save_state(chat_id, state)
-    
-    msg = (f"🏏 **PLAYER ON AUCTION** 🏏\n"
-           f"Name: {player['name']} ({player['nat']})\n"
-           f"Role: {player['role']}\n"
-           f"Base Price: {player['base']} Cr")
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    if player:
+        state['current_player'] = player
+        state['current_bid'] = player['base']
+        state['highest_bidder'] = None
+        state['status'] = "BIDDING"
+        state['unsold'] = [p for p in state['unsold'] if p['id'] != player['id']]
+        save_state(chat_id, state)
+        await update.message.reply_text(f"🏏 **AUCTIONING**: {player['name']}\nRole: {player['role']} | Nat: {player['nat']} | Base: {player['base']} Cr")
 
 async def bid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
     state = load_state(chat_id)
-    
-    if not state or state['status'] != "BIDDING":
-        return # Silent fail if not bidding
+    if not state or state['status'] != "BIDDING": return
 
-    # Find Team
-    my_team_name = None
-    for t_name, t_data in state['teams'].items():
-        if t_data['owner_id'] == user_id:
-            my_team_name = t_name
-            break
-            
-    if not my_team_name:
-        await update.message.reply_text("🚫 You are not a team owner.")
-        return
+    user_id = update.effective_user.id
+    team_name = next((n for n, t in state['teams'].items() if t['owner_id'] == user_id), None)
+    if not team_name: return
 
     try:
         amount = float(context.args[0])
-        team_data = state['teams'][my_team_name]
+        team_data = state['teams'][team_name]
+        if amount > (PURSE_LIMIT - team_data['spent']): return
+        if amount <= state['current_bid']: return
         
-        # 1. Money Check
-        remaining_purse = state['purse_limit'] - team_data['spent']
-        if amount > remaining_purse:
-            await update.message.reply_text(f"💸 Insufficient funds! You have {remaining_purse:.2f} Cr.")
-            return
-
-        # 2. Bid Value Check
-        if amount <= state['current_bid']:
-            await update.message.reply_text(f"⚠ Bid higher than {state['current_bid']} Cr.")
-            return
-
-        # 3. SQUAD RULES CHECK (Crucial Step)
         allowed, reason = check_rules(team_data, state['current_player'])
         if not allowed:
-            await update.message.reply_text(f"🚫 Rule Violation: {reason}")
+            await update.message.reply_text(f"🚫 {reason}")
             return
 
-        # Success
         state['current_bid'] = amount
-        state['highest_bidder'] = my_team_name
+        state['highest_bidder'] = team_name
         save_state(chat_id, state)
-        await update.message.reply_text(f"💰 **{my_team_name}** bids {amount} Cr!")
-        
-    except:
-        pass
+        await update.message.reply_text(f"💰 {team_name} bids {amount} Cr")
+    except: pass
 
 async def sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    state = load_state(chat_id)
-    if not state or not is_admin(update.effective_user.id, state): return
-    
-    player = state['current_player']
-    if not player: return
+    if not await is_user_admin(update, context): return
+    state = load_state(update.effective_chat.id)
+    if not state or not state['current_player']: return
 
     winner = state['highest_bidder']
-    price = state['current_bid']
-
+    player = state['current_player']
     if not winner:
         state['passed_players'].append(player)
-        await update.message.reply_text(f"❌ **{player['name']}** is UNSOLD.")
+        await update.message.reply_text(f"❌ {player['name']} remains UNSOLD.")
     else:
-        state['teams'][winner]['spent'] += price
+        price = state['current_bid']
         player['sold_price'] = price
+        state['teams'][winner]['spent'] += price
         state['teams'][winner]['squad'].append(player)
         
-        # Check warnings
         wk, bowl = get_team_stats(state['teams'][winner]['squad'])
-        warning_msg = ""
+        warn = ""
         if len(state['teams'][winner]['squad']) == MAX_SQUAD_SIZE:
-             if wk < MIN_WICKETKEEPERS: warning_msg += "\n⚠ Warning: You missed the Min 1 Wicketkeeper rule!"
-             if bowl < MIN_BOWLING_OPTIONS: warning_msg += "\n⚠ Warning: You missed the Min 6 Bowling Options rule!"
-
-        await update.message.reply_text(f"🔨 **SOLD!**\n{player['name']} to {winner} for {price} Cr!{warning_msg}")
+            if wk < MIN_WICKETKEEPERS: warn += "\n⚠ Notice: Min 1 WK rule not met."
+            if bowl < MIN_BOWLING_OPTIONS: warn += f"\n⚠ Notice: Only {bowl}/6 bowling options."
+            
+        await update.message.reply_text(f"🔨 **SOLD!** {player['name']} to {winner} for {price} Cr!{warn}")
 
     state['current_player'] = None
-    state['current_bid'] = 0
-    state['highest_bidder'] = None
     state['status'] = "IDLE"
-    save_state(chat_id, state)
+    save_state(update.effective_chat.id, state)
 
-async def unsold_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    state = load_state(chat_id)
-    if not state: return
-
-    if not state['passed_players']:
-        await update.message.reply_text("No unsold players yet.")
+async def unsold_players(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = load_state(update.effective_chat.id)
+    if not state or not state['passed_players']:
+        await update.message.reply_text("No players currently in the unsold pool.")
         return
-
-    msg = "📋 **Unsold Players List**\n"
-    for p in state['passed_players']:
-        msg += f"- {p['name']} ({p['role']})\n"
-    
+    msg = "📋 **UNSOLD LIST**\n" + "\n".join([f"• {p['name']} ({p['id']})" for p in state['passed_players']])
     await update.message.reply_text(msg)
 
 async def view_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    state = load_state(chat_id)
+    state = load_state(update.effective_chat.id)
     if not state: return
+    msg = "💰 **PURSE STATUS**\n"
+    for t_name, t_data in state['teams'].items():
+        rem = PURSE_LIMIT - t_data['spent']
+        msg += f"• **{t_name}**: {rem:.2f} Cr | Squad: {len(t_data['squad'])}/15\n"
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
-    if "/purse" in update.message.text:
-        msg = "💰 **Purse Status**\n"
-        for t_name, t_data in state['teams'].items():
-            rem = state['purse_limit'] - t_data['spent']
-            msg += f"{t_name}: {rem:.2f} Cr\n"
-        await update.message.reply_text(msg)
-        
-    elif "/teamlist" in update.message.text:
-        msg = ""
-        for t_name, t_data in state['teams'].items():
-            wk, bowl = get_team_stats(t_data['squad'])
-            rem = state['purse_limit'] - t_data['spent']
-            
-            msg += f"\n🏆 **{t_name}**\nPurse: {rem:.2f} Cr | Players: {len(t_data['squad'])}/15\n"
-            msg += f"WK: {wk}/{MIN_WICKETKEEPERS} | Bowl: {bowl}/{MIN_BOWLING_OPTIONS}\n"
-            
-            for p in t_data['squad']:
-                msg += f"- {p['name']} ({p['nat']}) - {p['sold_price']} Cr\n"
-        await update.message.reply_text(msg)
-
-# --- FLASK SERVER ---
+# --- FLASK ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "IPL Advanced Bot Running"
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+def home(): return "IPL Bot Online"
 
-# --- MAIN ---
 if __name__ == '__main__':
     init_db()
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    app_bot = ApplicationBuilder().token(TOKEN).build()
-    
-    app_bot.add_handler(CommandHandler("start_auction", start_auction))
-    app_bot.add_handler(CommandHandler("pause_auction", control_auction))
-    app_bot.add_handler(CommandHandler("resume_auction", control_auction))
-    app_bot.add_handler(CommandHandler("end_auction", control_auction))
-    app_bot.add_handler(CommandHandler("add_owner", add_owner))
-    
-    app_bot.add_handler(CommandHandler("new_player", bring_player))
-    app_bot.add_handler(CommandHandler("player", bring_player))
-    app_bot.add_handler(CommandHandler("bid", bid))
-    app_bot.add_handler(CommandHandler("sold", sold))
-    
-    app_bot.add_handler(CommandHandler("purse", view_info))
-    app_bot.add_handler(CommandHandler("teamlist", view_info))
-    app_bot.add_handler(CommandHandler("unsold_players", unsold_list))
-    app_bot.add_handler(CommandHandler("help", help_command))
-    
-    print("Bot Started...")
-    app_bot.run_polling()
-
-
-
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000))), daemon=True).start()
+    bot = ApplicationBuilder().token(TOKEN).build()
+    bot.add_handler(CommandHandler("start_auction", start_auction))
+    bot.add_handler(CommandHandler("pause_auction", control_auction))
+    bot.add_handler(CommandHandler("resume_auction", control_auction))
+    bot.add_handler(CommandHandler("end_auction", control_auction))
+    bot.add_handler(CommandHandler("add_owner", add_owner))
+    bot.add_handler(CommandHandler("new_player", bring_player))
+    bot.add_handler(CommandHandler("player", bring_player))
+    bot.add_handler(CommandHandler("bid", bid))
+    bot.add_handler(CommandHandler("sold", sold))
+    bot.add_handler(CommandHandler("unsold_players", unsold_players))
+    bot.add_handler(CommandHandler("purse", view_info))
+    bot.add_handler(CommandHandler("help", help_command))
+    bot.run_polling()
