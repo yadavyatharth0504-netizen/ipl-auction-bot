@@ -1,4 +1,4 @@
-import os
+¼import os
 import json
 import logging
 import random
@@ -9,7 +9,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from flask import Flask
 
 # --- CONFIGURATION ---
-TOKEN = "8250315005:AAGDDZHqcYOp0_e7Ab6-aCzXx1-RDi6w_AY" 
+TOKEN = "8370192102:AAEDaW7LCGRLqHB8PUprLOxUDhYm1eYhKO8" 
 DB_URI = os.getenv("DATABASE_URL")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -668,4 +668,5 @@ if __name__ == '__main__':
     
     print("Bot Started...")
     app_bot.run_polling()
+
 
