@@ -428,7 +428,6 @@ async def control_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_state(chat_id, state)
 
 async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
     if not state or not is_admin(update.effective_user.id, state): return
@@ -669,3 +668,4 @@ if __name__ == '__main__':
     
     print("Bot Started...")
     app_bot.run_polling()
+
