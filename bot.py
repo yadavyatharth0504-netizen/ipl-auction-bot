@@ -300,14 +300,6 @@ def load_state(chat_id):
     return json.loads(row[0]) if row else None
 
 # --- HELPERS ---
-async def is_user_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    try:
-        member = await context.bot.get_chat_member(chat_id, user_id)
-        return member.status in ['administrator', 'creator']
-    except: return False
-
 def get_team_stats(squad):
     wk = sum(1 for p in squad if p['role'] == 'Wicketkeeper')
     bowl = sum(1 for p in squad if p['role'] in ['Bowler', 'Allrounder'])
@@ -342,23 +334,22 @@ def check_rules(team_data, new_player):
 # --- COMMANDS ---
 
 async def start_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     if load_state(chat_id):
         await update.message.reply_text("⚠ Auction already running!")
         return
     state = {
-        "status": "IDLE", "teams": {}, "unsold": MASTER_PLAYER_LIST.copy(),
+        "admin": user_id, "status": "IDLE", "teams": {}, "unsold": MASTER_PLAYER_LIST.copy(),
         "passed_players": [], "current_player": None, "current_bid": 0, "highest_bidder": None
     }
     save_state(chat_id, state)
-    await update.message.reply_text("🚀 **Auction Started!**\nPurse: 120 Cr | Any Admin can manage commands.")
+    await update.message.reply_text("🚀 **Auction Started!**\nPurse: 120 Cr | Admin rights assigned to current user.")
 
 async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
-    if not state: return
+    if not state or update.effective_user.id != state['admin']: return
     try:
         team_name = context.args[0]
         target = update.message.reply_to_message.from_user if update.message.reply_to_message else None
@@ -377,9 +368,8 @@ async def add_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: await update.message.reply_text("Usage: /add_owner <TeamName> (Reply to user)")
 
 async def remove_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
     state = load_state(update.effective_chat.id)
-    if not state or not context.args: return
+    if not state or update.effective_user.id != state['admin'] or not context.args: return
     team_name = " ".join(context.args)
     if team_name in state['teams']:
         del state['teams'][team_name]
@@ -389,10 +379,10 @@ async def remove_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Team not found.")
 
 async def replace_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
     state = load_state(update.effective_chat.id)
+    if not state or update.effective_user.id != state['admin']: return
     target = update.message.reply_to_message.from_user if update.message.reply_to_message else None
-    if not state or not context.args or not target:
+    if not context.args or not target:
         await update.message.reply_text("Usage: Reply to the new owner and type /replace_owner <TeamName>")
         return
     team_name = " ".join(context.args)
@@ -405,10 +395,9 @@ async def replace_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Team not found.")
 
 async def bring_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
-    if not state: return
+    if not state or update.effective_user.id != state['admin']: return
     cmd = update.message.text
     player = None
     if "/new_player" in cmd:
@@ -476,9 +465,9 @@ async def bid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
 
 async def sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
-    state = load_state(update.effective_chat.id)
-    if not state or not state['current_player']: return
+    chat_id = update.effective_chat.id
+    state = load_state(chat_id)
+    if not state or update.effective_user.id != state['admin'] or not state['current_player']: return
     winner = state['highest_bidder']
     player = state['current_player']
     if not winner:
@@ -492,7 +481,7 @@ async def sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🔨 **SOLD!** {player['name']} to {winner} for {price} Cr!")
     state['current_player'] = None
     state['status'] = "IDLE"
-    save_state(update.effective_chat.id, state)
+    save_state(chat_id, state)
 
 async def my_team_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state(update.effective_chat.id)
@@ -505,11 +494,9 @@ async def my_team_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_team_details(update, state, target_team)
 
 async def admin_team_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
-    state = load_state(update.effective_chat.id)
-    if not state or not context.args:
-        await update.message.reply_text("Usage: /teamlist <TeamName>")
-        return
+    chat_id = update.effective_chat.id
+    state = load_state(chat_id)
+    if not state or update.effective_user.id != state['admin'] or not context.args: return
     target_team = " ".join(context.args)
     if target_team in state['teams']:
         await send_team_details(update, state, target_team)
@@ -533,9 +520,9 @@ async def unsold_players(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 async def make_unsold(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
-    state = load_state(update.effective_chat.id)
-    if not state or not context.args: return
+    chat_id = update.effective_chat.id
+    state = load_state(chat_id)
+    if not state or update.effective_user.id != state['admin'] or not context.args: return
     query = " ".join(context.args).lower()
     found = False
     for t_name, t_data in state['teams'].items():
@@ -547,14 +534,13 @@ async def make_unsold(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 found = True; owner_team = t_name; break
         if found: break
     if found:
-        save_state(update.effective_chat.id, state)
-        await update.message.reply_text(f"✅ {removed_player['name']} returned to unsold pool. Refunded {owner_team}.")
+        save_state(chat_id, state)
+        await update.message.reply_text(f"✅ {removed_player['name']} returned to pool. Refunded {owner_team}.")
 
 async def control_auction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_user_admin(update, context): return
     chat_id = update.effective_chat.id
     state = load_state(chat_id)
-    if not state: return
+    if not state or update.effective_user.id != state['admin']: return
     cmd = update.message.text
     if "/pause" in cmd: state['status'] = "PAUSED"; msg = "⏸ Auction Paused."
     elif "/resume" in cmd: state['status'] = "BIDDING" if state['current_player'] else "IDLE"; msg = "▶ Auction Resumed."
